@@ -42,7 +42,7 @@ Options:
     -n, --newline       Insert a newline between each policy for better
                         readability
     -d DELIMITER, --delimiter=DELIMITER
-                        CSV delimiter (default ";")
+                        CSV delimiter (default ",")
     -e INPUT_ENCODING, --input-encoding=INPUT_ENCODING
                         Input file encoding (default "utf-8")
     -f OUTPUT_ENCODING, --output-encoding=OUTPUT_ENCODING
