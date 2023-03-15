@@ -29,6 +29,7 @@ import sys
 import re
 import csv
 import os
+import shlex
 
 # OptionParser imports
 from optparse import OptionParser
@@ -42,7 +43,7 @@ main_grp.add_option('-i', '--input-file', help='Partial or full Fortigate config
 main_grp.add_option('-o', '--output-file', help='Output csv file (default ./policies-out.csv)', default=path.abspath(path.join(os.getcwd(), './policies-out.csv')))
 main_grp.add_option('-s', '--skip-header', help='Do not print the csv header', action='store_true', default=False)
 main_grp.add_option('-n', '--newline', help='Insert a newline between each policy for better readability', action='store_true', default=False)
-main_grp.add_option('-d', '--delimiter', help='CSV delimiter (default ";")', default=';')
+main_grp.add_option('-d', '--delimiter', help='CSV delimiter (default ",")', default=',')
 main_grp.add_option('-e', '--input-encoding', help='Input file encoding (default "utf-8")', default='utf-8')
 main_grp.add_option('-f', '--output-encoding', help='Output file encoding (default "utf-8-sig" to make it easily viewable with MS Excel)', default='utf-8-sig')
 parser.option_groups.extend([main_grp])
@@ -124,10 +125,13 @@ def parse(options):
                         order_keys.append(policy_key)
                     
                     policy_value = p_policy_set.search(line).group('policy_value').strip()
-                    policy_value = re.sub('["]', '', policy_value)
                     
                     
-                    policy_elem[policy_key] = policy_value
+                    if policy_key == 'srcaddr' or policy_key == 'dstaddr' or policy_key == 'service':
+                        policy_elem[policy_key] = shlex.split(policy_value, " ")
+                    else:
+                        policy_value = re.sub('["]', '', policy_value)
+                        policy_elem[policy_key] = policy_value
                     if policy_key == 'action' and policy_value == 'ssl-vpn':
                         inspect_next_ssl_vpn_command = True
                         skip_ssl_vpn_policy_block = True
@@ -164,7 +168,10 @@ def generate_csv(results, keys, options):
                 
                 for key in keys:
                     if key in policy.keys():
-                        output_line.append(policy[key])
+                        if isinstance(policy[key], list):
+                            output_line.append("\n".join(policy[key]))
+                        else:
+                            output_line.append(policy[key])
                     else:
                         output_line.append('')
             
