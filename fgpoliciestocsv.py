@@ -46,6 +46,7 @@ main_grp.add_option('-n', '--newline', help='Insert a newline between each polic
 main_grp.add_option('-d', '--delimiter', help='CSV delimiter (default ",")', default=',')
 main_grp.add_option('-e', '--input-encoding', help='Input file encoding (default "utf-8")', default='utf-8')
 main_grp.add_option('-f', '--output-encoding', help='Output file encoding (default "utf-8-sig" to make it easily viewable with MS Excel)', default='utf-8-sig')
+main_grp.add_option('-a', '--parse-iface-alias', help='Also parse interface alias', default=True)
 parser.option_groups.extend([main_grp])
 
 # Python 2 and 3 compatibility
@@ -61,20 +62,75 @@ else:
 p_entering_policy_block = re.compile(r'^\s*config firewall policy$', re.IGNORECASE)
 p_entering_subpolicy_block = re.compile(r'^\s*config .*$', re.IGNORECASE)
 
+p_entering_iface_block = re.compile(r'^\s*config system interface$', re.IGNORECASE)
+
 # -- Exiting policy definition block
 p_exiting_policy_block = re.compile(r'^end$', re.IGNORECASE)
+p_exiting_iface_block = re.compile(r'^end$', re.IGNORECASE)
 
 # -- Commiting the current policy definition and going to the next one
 p_policy_next = re.compile(r'^next$', re.IGNORECASE)
+p_iface_next = re.compile(r'^next$', re.IGNORECASE)
 
 # -- Policy number
 p_policy_number = re.compile(r'^\s*edit\s+(?P<policy_number>\d+)', re.IGNORECASE)
+p_iface_name = re.compile(r'^\s*edit\s+(?P<iface_name>.+)', re.IGNORECASE)
 
 # -- Policy setting
 p_policy_set = re.compile(r'^\s*set\s+(?P<policy_key>\S+)\s+(?P<policy_value>.*)$', re.IGNORECASE)
+p_iface_set = re.compile(r'^\s*set\s+(?P<iface_key>\S+)\s+(?P<iface_value>.*)$', re.IGNORECASE)
+
+def parse_iface_alias(options):
+    """
+        Parse the data according to several regexes
+        
+        @param options:  options
+        @rtype: return a list of policies ( [ {'id' : '1', 'srcintf' : 'internal', ...}, {'id' : '2', 'srcintf' : 'external', ...}, ... ] )  
+                and the list of unique seen keys ['id', 'srcintf', 'dstintf', ...]
+    """
+    global p_entering_iface_block, p_exiting_iface_block, p_iface_next, p_iface_number, p_iface_set
+    iface_alias={}
+    iface_elem={}
+    iface_name=""
+
+    with io.open(options.input_file, mode=fd_read_options, encoding=options.input_encoding) as fd_input:
+        for line in fd_input:
+            line = line.strip()
+            
+            # We match a policy block
+            if p_entering_iface_block.search(line):
+                in_iface_block = True
+    
+            # We are in a policy block
+            if in_iface_block:
+                if p_iface_name.search(line):
+                    iface_name = p_iface_name.search(line).group('iface_name')
+                    print (iface_name+"\n")
+                    iface_elem[u'iface_name'] = iface_name
+                    iface_alias[iface_name]=iface_name
+               
+                # We match a setting
+                if p_iface_set.search(line):
+                    iface_key = p_iface_set.search(line).group('iface_key')
+                    iface_value = p_policy_set.search(line).group('policy_value').strip()
+                    
+                    if iface_key == 'alias':
+                        iface_alias[iface_name] = re.sub(r'[^\x00-\x7f]',r'', iface_value)
+                
+                # We are done with the current policy id
+                if p_iface_next.search(line):                    
+                    iface_elem = {}
+                    
+            
+            # We are exiting the policy block
+            if p_exiting_iface_block.search(line):
+                in_iface_block = False
+    
+    return (iface_alias)
+
 
 # Functions
-def parse(options):
+def parse(options, iface_alias):
     """
         Parse the data according to several regexes
         
@@ -126,8 +182,9 @@ def parse(options):
                     
                     policy_value = p_policy_set.search(line).group('policy_value').strip()
                     
-                    
-                    if policy_key == 'srcaddr' or policy_key == 'dstaddr' or policy_key == 'service':
+                    if len(iface_alias) > 0  and (policy_key == 'srcintf' or policy_key == 'dstintf'):
+                        policy_elem[policy_key] = iface_alias[policy_value]
+                    elif policy_key == 'srcaddr' or policy_key == 'dstaddr' or policy_key == 'service':
                         policy_elem[policy_key] = shlex.split(policy_value, " ")
                     else:
                         policy_value = re.sub('["]', '', policy_value)
@@ -197,7 +254,13 @@ def main():
     if (sys.version_info < (3, 0)):
         options.output_encoding = None
     
-    results, keys = parse(options)
+    if (options.parse_iface_alias):
+        iface_alias = parse_iface_alias(options)
+        #print(iface_alias)
+    else:
+        iface_alias = {}
+    
+    results, keys = parse(options, iface_alias)
     generate_csv(results, keys, options)
     
     return None
